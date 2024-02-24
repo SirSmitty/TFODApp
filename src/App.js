@@ -1,121 +1,149 @@
-// Import dependencies
-import React, { useRef, useEffect } from "react";
-import * as tf from "@tensorflow/tfjs";
-// import * as tfmodel from "@tensorflow-models/tfmodel";
-import Webcam from "react-webcam";
-import "./App.css";
-import { nextFrame } from "@tensorflow/tfjs";
+const express = require('express');
+const tf = require('@tensorflow/tfjs-node');
+const multer = require('multer');
+const fs = require('fs');
+const Parser = require('rss-parser');
+const router = express.Router();
+
+// Configure multer for image upload
+const upload = multer({ dest: 'uploads/' });
 
 
-// 2. TODO - Import drawing utility here
-import { drawRect } from "./utilities";
-// import { unstable_renderSubtreeIntoContainer } from "react-dom";
+// Load TensorFlow model asynchronously
+// let model;
+// tf.loadGraphModel('https://xrtranslate-standard-83t.s3.us-east.cloud-object-storage.appdomain.cloud/model.json')
+//   .then((loadedModel) => {
+//     model = loadedModel;
+//     console.log('Model loaded successfully');
+//   })
+//   .catch((error) => {
+//     console.error('Error loading the model', error);
+//   });
 
-function App() {
-  const webcamRef = useRef(null);
-  const canvasRef = useRef(null);
+// Load your TensorFlow model
 
-  // Main function
-  const runCoco = async () => {
-    // 3. TODO - Load network 
-    const net = await tf.loadGraphModel('https://xrtranslate-standard-83t.s3.us-east.cloud-object-storage.appdomain.cloud/model.json')
-    const outputs = await net.load()
-    console.log("MODEL OUTPUTS:" + net.outputs)
+// var model;
+// (async () =>{
+//     model = await tf.loadGraphModel('https://xrtranslate-standard-83t.s3.us-east.cloud-object-storage.appdomain.cloud/model.json');
+// })();
 
 
-    // Loop and detect hands
-    setInterval(() => {
-      detect(net);
-    }, 16.7);
-  };
 
-  const detect = async (net) => {
-    // Check data is available
-    if (
-      typeof webcamRef.current !== "undefined" &&
-      webcamRef.current !== null &&
-      webcamRef.current.video.readyState === 4
-    ) {
-      // Get Video Properties
-      const video = webcamRef.current.video;
-      const videoWidth = webcamRef.current.video.videoWidth;
-      const videoHeight = webcamRef.current.video.videoHeight;
+router.post('/', upload.single('image'), async (req, res) => {
+    const model = await tf.loadGraphModel('https://xrtranslate-standard-83t.s3.us-east.cloud-object-storage.appdomain.cloud/model.json');
 
-      // Set video width
-      webcamRef.current.video.width = videoWidth;
-      webcamRef.current.video.height = videoHeight;
+    if (!req.file) {
+        return res.status(400).send('No image uploaded.');
+    }
 
-      // Set canvas height and width
-      canvasRef.current.width = videoWidth;
-      canvasRef.current.height = videoHeight;
+    // Read the image file into a buffer
+    const imageBuffer = fs.readFileSync(req.file.path);
 
-      // Make Detections
-      const img = tf.browser.fromPixels(video)
-      const resized = tf.image.resizeBilinear(img, [640, 480])
-      const casted = resized.cast('int32')
-      const expanded = casted.expandDims(0)
-      const obj = await net.executeAsync(expanded)
+    // Decode the image buffer into a tensor
+    const img = tf.node.decodeImage(imageBuffer, 3); // 3 for RGB channels
+    const resized = tf.image.resizeBilinear(img, [640, 480]);
+    const casted = resized.cast('int32');
+    const expanded = casted.expandDims(0);
+    const obj = await model.executeAsync(expanded);
 
-      // Extracting boxes, classes, and scores
-      const boxes = await obj[1].array(); // or obj[3].array() if this doesn't work
-      const classes = await obj[2].array();
-      const scores = await obj[4].array();
+    // Assuming obj contains the detection results
+    const boxes = await obj[1].array(0);
+    const classes = await obj[2].array();
+    const scores = await obj[4].array();
 
-      // Draw mesh
-      const ctx = canvasRef.current.getContext("2d");
+    // Clean up tensor objects
+    tf.dispose([resized, casted, obj]);
 
-      // Update drawing utility
-      requestAnimationFrame(() => {
-        drawRect(boxes[0], classes[0], scores[0], 0.5, videoWidth, videoHeight, ctx);
-      });
+    // Send back the detection results
+    res.json({ 
+        boxes: boxes.length > 0 ? boxes[0] : [], 
+        classes: classes.length > 0 ? classes[0] : [], 
+        scores: scores.length > 0 ? scores[0] : [] 
+    });
 
-      // Dispose of tensors
-      tf.dispose(img)
-      tf.dispose(resized)
-      tf.dispose(casted)
-      tf.dispose(expanded)
-      obj.forEach(tensor => tf.dispose(tensor))
-    };
-  };
+    // Optionally, clean up the uploaded file
+    fs.unlinkSync(req.file.path);
+});
 
-  useEffect(() => { runCoco() }, [runCoco]);
 
-  return (
-    <div className="App">
-      <header className="App-header">
-        <Webcam
-          ref={webcamRef}
-          muted={true}
-          style={{
-            position: "absolute",
-            marginLeft: "auto",
-            marginRight: "auto",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            zindex: 9,
-            width: 640,
-            height: 480,
-          }}
-        />
+module.exports = router;
 
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: "absolute",
-            marginLeft: "auto",
-            marginRight: "auto",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            zindex: 8,
-            width: 640,
-            height: 480,
-          }}
-        />
-      </header>
-    </div>
-  );
-}
 
-export default App;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//     // Handle file upload
+//     const handleImageUpload = event => {
+//         const { files } = event.target;
+//         if (files.length > 0) {
+//             const url = URL.createObjectURL(files[0]);
+//             imageRef.current.src = url; // Set the image src to display the image
+//         }
+//     };
+
+//     const detect = async (imageElement) => {
+//         if (model && imageElement) {
+//             const videoWidth = imageElement.width;
+//             const videoHeight = imageElement.height;
+
+//             // Set canvas height and width
+//             canvasRef.current.width = videoWidth;
+//             canvasRef.current.height = videoHeight;
+
+//             // Make Detections
+            // const img = tf.browser.fromPixels(imageElement);
+            // const resized = tf.image.resizeBilinear(img, [640, 480]);
+            // const casted = resized.cast('int32');
+            // const expanded = casted.expandDims(0);
+            // const obj = await model.executeAsync(expanded);
+
+//             // Extracting boxes, classes, and scores
+//             const boxes = await obj[1].array();
+//             const classes = await obj[2].array();
+//             const scores = await obj[4].array();
+//             console.log("BOXES", boxes[0])
+//             console.log("CLASSES", classes[0])
+//             console.log("SCORES", scores[0])
+
+//             // Draw mesh
+//             const ctx = canvasRef.current.getContext('2d');
+//             drawRect(boxes[0], classes[0], scores[0], 0.5, videoWidth, videoHeight, ctx);
+
+//             // Dispose of tensors
+//             tf.dispose([img, resized, casted, expanded, ...obj]);
+//         }
+//     };
+    
+// router.get('/',async (req,res) => {
+
+
+//     const imageRef = useRef(null);
+//     const canvasRef = useRef(null);
+//     const [model, setModel] = useState(null);
+
+//     // Load the TensorFlow model once when the component mounts
+//     useEffect(() => {
+//         const loadModel = async () => {
+//             const loadedModel = await tf.loadGraphModel('https://xrtranslate-standard-83t.s3.us-east.cloud-object-storage.appdomain.cloud/model.json');
+//             setModel(loadedModel);
+//             console.log('Model loaded.');
+//         };
+//         loadModel();
+//     }, []);
+
+
+// })
+
+
